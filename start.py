@@ -11,6 +11,17 @@ import optax
 from functools import partial
 import gdown
 import jax.numpy as jnp
+import sys
+from typing import Any
+from jax.tree_util import tree_structure, tree_flatten, tree_flatten_with_path
+
+
+def named_grad_norms(grads):
+    flat = tree_flatten_with_path(grads)[0]
+    return {
+        ".".join(str(k) for k in path): jnp.sqrt(jnp.sum(leaf**2))
+        for path, leaf in flat if leaf is not None
+    }
 
 def _download_celeba(dest_dir):
     os.makedirs(dest_dir, exist_ok=True)
@@ -42,19 +53,17 @@ def _load_landmarks(landmark_file):
     return filenames, landmarks
 
 
-def generate_heatmaps_from_keypoints(keypoints, heatmap_size, sigma=1.0):
-    B, K = len(keypoints), keypoints[0].shape[0]
+def generate_heatmaps_from_keypoints(keypoints, heatmap_size, sigma=1):
+    K = keypoints.shape[0] # [(x_0, y_0), (x_1, y_1), (y_2, y_2), ...]
     H, W = heatmap_size
     y = jnp.arange(0, H)[:, None]
     x = jnp.arange(0, W)[None, :]
-    y = jnp.tile(y, (1, W))
-    x = jnp.tile(x, (H, 1))
 
-    def gen_single(b, k):
-        cx, cy = keypoints[b][k]
+    def gen_single(k):
+        cx, cy = keypoints[k]
         return jnp.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * sigma**2))
 
-    return [[gen_single(b, k) for k in range(K)] for b in range(B)]
+    return [gen_single(k) for k in range(K)]
 
 
 def heatmap_to_keypoints(heatmaps):
@@ -64,6 +73,41 @@ def heatmap_to_keypoints(heatmaps):
     idx = jnp.argmax(flat, axis=-1)
     y, x = jnp.divmod(idx, W)
     return jnp.stack([x, y], axis=-1)  # [B, K, 2]
+
+
+def softargmax_heatmaps(heatmaps):
+    """
+    Convert [B, K, H, W] heatmaps into [B, K, 2] keypoints using softargmax.
+    Args:
+        heatmaps: predicted heatmaps [B, K, H, W]
+        normalize: if True, outputs coords in [-1, 1], else in pixel units
+    Returns:
+        coords: [B, K, 2] — soft (x, y) keypoints
+    """
+    B, K, H, W = heatmaps.shape
+
+    normalize = False
+    temp = 10
+
+    # Create grid
+    if normalize:
+        x_range = jnp.linspace(-1.0, 1.0, W)
+        y_range = jnp.linspace(-1.0, 1.0, H)
+    else:
+        x_range = jnp.arange(W)
+        y_range = jnp.arange(H)
+
+    grid_x, grid_y = jnp.meshgrid(x_range, y_range)
+    grid = jnp.stack([grid_x, grid_y], axis=-1)  # [H, W, 2]
+    grid = grid[None, None, :, :, :]  # [1, 1, H, W, 2]
+
+    # Apply softmax over spatial dims
+    flat = heatmaps.reshape(B, K, -1)
+    weights = jax.nn.softmax(flat*temp, axis=-1).reshape(B, K, H, W)[..., None]  # [B, K, H, W, 1]
+
+    # Compute expected (x, y)
+    coords = jnp.sum(weights * grid, axis=(2, 3))  # [B, K, 2]
+    return coords
 
 
 def resize_keypoints(keypoints, original_size, new_size):
@@ -97,15 +141,17 @@ def celeba_keypoints(directory, max_samples=None):
         if max_samples and idx >= max_samples:
             break
         img_path = os.path.join(image_folder, filename)
-        img = Image.open(img_path).convert("L").resize((64, 64))
+        img = Image.open(img_path).resize((64, 64))
         img_np = np.array(img, dtype=np.float32) / 255.0
-        #img_np = np.moveaxis(img_np, -1, 0)
-        images.append(img_np[None, ...])  # Add channel dim
+        img_np = np.moveaxis(img_np, -1, 0)
+        print(img_np.shape)
+        #images.append(img_np[None, ...])  # Add channel dim
+        images.append(img_np)
 
         lm = resize_keypoints(lm.reshape(5,2), (218, 178), (64,64))
         keypoints.append(lm)  # (x1,y1,...,x5,y5) → [[x,y], ...]
 
-    keypoints = generate_heatmaps_from_keypoints(keypoints, (64,64))
+    #keypoints = generate_heatmaps_from_keypoints(keypoints, (64,64))
 
     print(f"Length of images is {len(images)}")
 
@@ -217,9 +263,12 @@ class Decoder(eqx.Module):
         return x, state
 
 
+
+
 class HourGlass(eqx.Module):
     encoder: eqx.Module
     decoder: eqx.Module
+    #head: eqx.nn.Sequential
     conv: eqx.nn.Conv2d
 
     def __init__(self, key, block_expansion, in_features, out_features, num_blocks=3, max_features=256):
@@ -228,6 +277,12 @@ class HourGlass(eqx.Module):
         self.encoder = Encoder(encoder_key, block_expansion, in_features, num_blocks, max_features)
         self.decoder = Decoder(decoder_key, block_expansion, in_features, num_blocks, max_features)
 
+        #self.head = eqx.nn.Sequential([
+        #    eqx.nn.Conv2d(key=conv_key, kernel_size=1, in_channels=self.decoder.output_feature_count, out_channels=out_features, padding=0),
+        #    eqx.nn.BatchNorm(input_size=out_features, axis_name="batch"),
+        #    eqx.nn.Lambda(jax.nn.relu),
+        #    ])
+
         self.conv = eqx.nn.Conv2d(key=conv_key, kernel_size=1, in_channels=self.decoder.output_feature_count, out_channels=out_features, padding=0)
 
     # state is a tuple
@@ -235,40 +290,58 @@ class HourGlass(eqx.Module):
 
         x, state = self.encoder(input_, state)
         x, state = self.decoder(x, state)
+        #x, state = self.head(x, state)
 
         return self.conv(x), state
+
+
+def spatial_softmax(heatmaps):
+
+    K, H, W = heatmaps.shape
+    flat = heatmaps.reshape(K, -1)
+    norm = jax.nn.log_softmax(flat, axis=-1)
+    return norm.reshape(K, H, W)
+
+
+def batch_spatial_softmax(heatmaps):
+    """
+    Apply softmax over spatial dimensions of [B, K, H, W] tensor.
+    Returns: normalized heatmaps of same shape
+    """
+    return jax.vmap(spatial_softmax)(heatmaps)
+
 
 
 @partial(eqx.filter_value_and_grad,has_aux=True)
 def loss_fn(model, x, y, state):
     model = jax.vmap(model, axis_name="batch", in_axes=(0,None), out_axes=(0,None))
     pred, state = model(x, state)
-    return jnp.mean((pred - y) ** 2), state
+    loss1 =  jnp.mean((softargmax_heatmaps(pred) -  y) ** 2)
+    return loss1, (state, pred)
 
 
 @eqx.filter_jit
 def make_step(model, state, opt_state, x, y, optimizer):
-    (loss, state), grads = loss_fn(model, x, y, state)
+    (loss, aux), grads = loss_fn(model, x, y, state)
+    state, pred = aux
     updates, opt_state = optimizer.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
-    return model, opt_state, loss, state
+    return model, opt_state, loss, state, pred, grads
 
 def compute_eval_metrics(pred_keypoints, true_keypoints):
+    """Returns average per-point L2 distance (pixel error)."""
     dists = jnp.linalg.norm(pred_keypoints - true_keypoints, axis=-1)  # [B, K]
     return jnp.mean(dists)  # scalar
 
 
-def soft_argmax(heatmaps, beta=100.0):
-
-    B, K, H, W = heatmaps.shape
-    flat = heatmaps.reshape(B, K, -1)
-
-    softmaxed = jax.nn.softmax(flat * beta, axis=-1)  # [B, K, H*W]
-
-    coords = jnp.arange(H * W)
-    expected = jnp.sum(softmaxed * coords, axis=-1)  # [B, K]
-    y, x = jnp.divmod(expected, W)
-    return jnp.stack([x, y], axis=-1)
+def dump_to_folder(index ,image, keypoints, actual_keypoints, folder):
+    plt.imshow(image[0]) #cmap="c")
+    plt.scatter(keypoints[:, 0], keypoints[:, 1], c="red")
+    plt.scatter(actual_keypoints[:, 0], actual_keypoints[:, 1], c="green")
+    plt.axis("off")
+    plt.tight_layout()
+    plt.savefig(os.path.join(folder,f"eval_{index}.png"), bbox_inches="tight", pad_inches=0)
+    plt.close()
 
 
 def evaluate_model(model, state, test_loader):
@@ -289,24 +362,84 @@ def evaluate_model(model, state, test_loader):
 
     inference_model = jax.vmap(inference_model, axis_name="batch") #, in_axes=(0,None), out_axes=(0,None))
 
+    counter = 0
+
     for batch_x, batch_y in test_loader:
 
+        #for i in range(30):
+        #    visualize_keypoints_on_image(batch_x[i], batch_y[i], filename=f"./eval/eeg_{counter}_{i}")
+
         pred_heatmaps, _ = inference_model(batch_x)
-        pred_keypoints = soft_argmax(pred_heatmaps)
-        eval_keypoints = heatmap_to_keypoints(batch_y)
+        pred_keypoints =  softargmax_heatmaps(pred_heatmaps)
+
+        #visualize_keypoints_on_image(batch_x[20], pred_heatmaps[20], filename=f"./eval/eeg_{counter}")
+        eval_keypoints = batch_y
 
         error = compute_eval_metrics(pred_keypoints, eval_keypoints)
         all_errors.append(error)
+        dump_to_folder(counter, batch_x[3], pred_keypoints[3], eval_keypoints[3], "./eval")
+        counter += 1
 
     return float(jnp.mean(jnp.array(all_errors)))
 
 
+def visualize_training(image, true_keypoints, heatmaps, alpha=0.5, cmap='jet', filename="test"):
+    """
+    image: [H, W] or [1, H, W] grayscale image (float32 or uint8)
+    heatmaps: [K, H, W] predicted or true heatmaps
+    keypoints: [K, 2] optional keypoint coordinates (x, y)
+    """
+
+    if image.ndim == 3:
+        image = image[0]  # [1, H, W] → [H, W]
+
+    H, W = image.shape
+
+    fig, axs = plt.subplots(ncols=2, nrows = 6, figsize=(5, 5), constrained_layout=True)
+
+    heatmaps = spatial_softmax(heatmaps)
+    true_heatmaps = generate_heatmaps_from_keypoints(true_keypoints, (64, 64))
+
+    for col in range(2):
+        for row in range(6):
+            ax = axs[row, col]
+            ax.imshow(image,cmap='gray')
+
+            if row == 0:
+                continue 
+
+            hm = true_heatmaps if col == 0 else heatmaps
+
+            ax.imshow(hm[row - 1], cmap=cmap, alpha=alpha)
+            ax.axis('off')
+
+
+    plt.savefig(f"./{filename}.png")
+    plt.close()
+
+
 if __name__ == '__main__':
-    train_images, train_keypoints, test_images, test_keypoints = celeba_keypoints("./data", max_samples=12000)
+    train_images, train_keypoints, test_images, test_keypoints = celeba_keypoints("./data", max_samples=18000)
+
+    #visualize_keypoints_on_image(test_images[100], test_keypoints[100])
+
+    #sys.exit(0)
 
     batch_size = 30
 
-    optimizer = optax.adam(1e-3)
+    lr = 4e-4
+
+    lr_schedule = optax.cosine_decay_schedule(
+        init_value=lr,
+        decay_steps=100,
+        alpha=0.2  # e.g., alpha=0.1 → final LR is 10% of init_lr
+    )
+
+    optimizer = optax.chain(
+            optax.clip_by_global_norm(1.0), 
+            optax.scale_by_adam(),
+            optax.scale_by_schedule(lr_schedule),
+            optax.scale(-1.0))
 
     seed = 3728
 
@@ -320,34 +453,28 @@ if __name__ == '__main__':
     )
 
     testloader = grain.load(
-        list(zip(test_images, test_images)),
+        list(zip(test_images, test_keypoints)),
         batch_size=batch_size,
         num_epochs=1,
         shuffle=True,
         seed=seed,
     )
 
-    model, state = eqx.nn.make_with_state(HourGlass)(key, 32, 1, 5, num_blocks=5, max_features=512)
+    model, state = eqx.nn.make_with_state(HourGlass)(key, 32, 3, 5, num_blocks=5, max_features=256)
 
     opt_state = optimizer.init(eqx.filter(model, eqx.is_inexact_array))
 
-    for step, (batch_x, batch_y) in zip(range(200), trainloader):
+    for step, (batch_x, batch_y) in zip(range(100), trainloader):
 
-        model, opt_state, loss, state = make_step(model, state, opt_state, batch_x, batch_y, optimizer)
+        model, opt_state, loss, state, pred, grads = make_step(model, state, opt_state, batch_x, batch_y, optimizer)
+
+        #print(named_grad_norms(grads))
 
         print(loss)
 
+        i = 12
+
         if step % 10 == 0:
+            visualize_training(batch_x[i], batch_y[i], pred[i], filename=f"./train/train_{step}_{i}")
 
             print("Eval :", evaluate_model(model, state, testloader))
-
-
-    #index = 4
-    #img = train_images[index][0]
-    #kps = train_keypoints[index]
-    #plt.imshow(img) #cmap="c")
-    #plt.scatter(kps[:, 0], kps[:, 1], c="red")
-    #plt.axis("off")
-    #plt.tight_layout()
-    #plt.savefig('./out.png', bbox_inches="tight", pad_inches=0)
-    #plt.close()
