@@ -25,5 +25,7 @@ pip install -e .
 
 python scripts/training.py
 
+python scripts/inference.py some_human_face_picture.jpeg
+
 ```
 
