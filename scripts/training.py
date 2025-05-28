@@ -1,21 +1,17 @@
 from dataclasses import dataclass
 from functools import partial
 
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-
+import optax
+import orbax
 
 import dataset
 import debugging
 import model
 import utils
 from config import Config
-
-
-import orbax
-import optax
 
 
 @partial(eqx.filter_value_and_grad, has_aux=True)

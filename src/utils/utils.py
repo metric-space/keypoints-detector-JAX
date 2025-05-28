@@ -1,11 +1,10 @@
 import os
-import equinox as eqx
+from typing import Tuple
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
-
-from typing import Tuple
 
 
 def save_model(

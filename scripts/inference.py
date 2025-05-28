@@ -1,17 +1,15 @@
-from utils import load_model
-import model
-import utils
-
-import jax
-import equinox as eqx
-
 import sys
 
+import equinox as eqx
+import jax
+import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
-import matplotlib.pyplot as plt
 
+import model
+import utils
 from config import Config
+from utils import load_model
 
 if __name__ == "__main__":
 
