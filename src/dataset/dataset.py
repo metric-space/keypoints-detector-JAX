@@ -85,7 +85,9 @@ def celeba_keypoints(directory, max_samples=None):
     )
 
 
-def celeba_train_test_dataloaders(directory, max_samples=None, batch_size=30, data_seed=1234):
+def celeba_train_test_dataloaders(
+    directory, max_samples=None, batch_size=30, data_seed=1234
+):
     train_images, train_keypoints, test_images, test_keypoints = celeba_keypoints(
         directory, max_samples=max_samples
     )

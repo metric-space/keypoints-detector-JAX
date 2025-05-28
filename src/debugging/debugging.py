@@ -66,7 +66,13 @@ def evaluate_model(model, state, test_loader):
 
 
 def visualize_training(
-    image, true_keypoints, heatmaps, alpha=0.5, cmap="jet", directory="train", filename="test"
+    image,
+    true_keypoints,
+    heatmaps,
+    alpha=0.5,
+    cmap="jet",
+    directory="train",
+    filename="test",
 ):
     """
     image: [H, W] or [1, H, W] grayscale image (float32 or uint8)
@@ -99,5 +105,5 @@ def visualize_training(
             ax.imshow(hm[row - 1], cmap=cmap, alpha=alpha)
             ax.axis("off")
 
-    plt.savefig(os.path.join(directory,f"{filename}.png"))
+    plt.savefig(os.path.join(directory, f"{filename}.png"))
     plt.close()

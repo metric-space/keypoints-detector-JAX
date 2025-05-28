@@ -23,7 +23,7 @@ requires-python = ">=3.9"
 [tool.black]
 line-length = 88
 target-version = ["py39"]
-include = 'start.py'
+include = '\.py$'
 exclude = '''
 /(
     \.git

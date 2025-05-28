@@ -8,17 +8,18 @@ import numpy as np
 from typing import Tuple
 
 
-def save_model(model: eqx.Module, state: eqx.nn.State, filename: str, directory:str="./models"):
+def save_model(
+    model: eqx.Module, state: eqx.nn.State, filename: str, directory: str = "./models"
+):
 
     os.makedirs(directory, exist_ok=True)
     with open(os.path.join(directory, filename), "wb") as f:
         eqx.tree_serialise_leaves(f, (model, state))
 
 
-def load_model(model: eqx.Module, filename:str) -> Tuple[eqx.Module, eqx.nn.State]:
+def load_model(model: eqx.Module, filename: str) -> Tuple[eqx.Module, eqx.nn.State]:
     with open(filename, "rb") as f:
         return eqx.tree_deserialise_leaves(f, model)
-
 
 
 # no batch expected here
@@ -78,7 +79,7 @@ def softargmax_heatmaps(heatmaps):
     grid = grid[None, :, :, :]  # [ 1, H, W, 2]
 
     # Apply softmax over spatial dims
-    weights = spatial_softmax(heatmaps, temp)[..., None ]  # [K, H, W, 1]
+    weights = spatial_softmax(heatmaps, temp)[..., None]  # [K, H, W, 1]
 
     # Compute expected (x, y)
     coords = jnp.sum(weights * grid, axis=(1, 2))  # [K, 2]

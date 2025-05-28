@@ -41,7 +41,10 @@ if __name__ == "__main__":
     config = Config()
 
     train_loader, test_loader = dataset.celeba_train_test_dataloaders(
-        directory=config.dataset_directory, max_samples=config.max_samples, data_seed=config.data_seed, batch_size=config.batch_size
+        directory=config.dataset_directory,
+        max_samples=config.max_samples,
+        data_seed=config.data_seed,
+        batch_size=config.batch_size,
     )
 
     batch_size = config.batch_size
@@ -60,16 +63,15 @@ if __name__ == "__main__":
     key = jax.random.PRNGKey(config.nn_seed)
 
     model, state = eqx.nn.make_with_state(model.HourGlass)(
-             key = key,
-             block_expansion = config.block_expansion,
-             in_features = config.input_channels,
-             out_features = config.output_channels,
-             num_blocks = config.num_blocks,
-             max_features = config.max_features,
+        key=key,
+        block_expansion=config.block_expansion,
+        in_features=config.input_channels,
+        out_features=config.output_channels,
+        num_blocks=config.num_blocks,
+        max_features=config.max_features,
     )
 
     opt_state = optimizer.init(eqx.filter(model, eqx.is_inexact_array))
-
 
     sample_index = 12
 
@@ -85,10 +87,17 @@ if __name__ == "__main__":
 
         if step % 10 == 0:
             debugging.visualize_training(
-                batch_x[sample_index], batch_y[sample_index], pred[sample_index], directory="train", filename=f"train_{step}_{sample_index}"
+                batch_x[sample_index],
+                batch_y[sample_index],
+                pred[sample_index],
+                directory="train",
+                filename=f"train_{step}_{sample_index}",
             )
 
-            print(f"Evaluation : accuracy ", debugging.evaluate_model(model, state, test_loader))
+            print(
+                f"Evaluation : accuracy ",
+                debugging.evaluate_model(model, state, test_loader),
+            )
 
-    print("Saving model to ./models") 
+    print("Saving model to ./models")
     utils.save_model(model, state, "keypoints.eqx", directory="./models")
