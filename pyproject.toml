@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "keypoints-detector-JAX"
+version = "0.1.0"
+description = "JAX & Equinox implementation of keypoint extractor of 2020 paper \" First Order Motion Model for Image Animation \" "
+authors = [{ name = "metric-space", email = "functor.soup@gmail.com" }]
+dependencies = [
+  "jax[cuda12]",
+  "equinox",
+  "matplotlib",
+  "jaxtyping",
+  "optax",
+  "orbax",
+  "pyyaml",
+  "grain",
+  "gdown"
+]
+requires-python = ">=3.9"
+
+[tool.black]
+line-length = 88
+target-version = ["py39"]
+include = 'start.py'
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | build
+  | dist
+  | lib
+  | lib64
+  | __pycache__
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 88
+multi_line_output = 3
+include_trailing_comma = true
+known_first_party = ["keypoints-detector-JAX"]
+skip = ["__init__.py"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+fix = true
+select = ["E", "F", "B", "I"]
+ignore = []
+
+[tool.setuptools]
+packages = ["utils", "debugging", "model", "dataset"]
+package-dir = {"" = "src"}
