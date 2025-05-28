@@ -38,6 +38,7 @@ if __name__ == "__main__":
 
     train_loader, test_loader = dataset.celeba_train_test_dataloaders(
         directory=config.dataset_directory,
+        resized_dims=config.image_size,
         max_samples=config.max_samples,
         data_seed=config.data_seed,
         batch_size=config.batch_size,
@@ -79,7 +80,7 @@ if __name__ == "__main__":
 
         # print(debugging.named_grad_norms(grads))
 
-        print(f"> Log: step-count {step}  with loss = ", loss)
+        print(f"> Log: step-count {step}  with loss = {loss}")
 
         if step % 10 == 0:
             debugging.visualize_training(
@@ -95,5 +96,7 @@ if __name__ == "__main__":
                 debugging.evaluate_model(model, state, test_loader),
             )
 
-    print("Saving model to ./models")
-    utils.save_model(model, state, "keypoints.eqx", directory="./models")
+    print(f"Saving model to {config.models_directory}")
+    utils.save_model(
+        model, state, config.model_filename, directory=config.models_directory
+    )

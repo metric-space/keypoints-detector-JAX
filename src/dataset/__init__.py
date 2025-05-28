@@ -1,1 +1,1 @@
-from .dataset import celeba_train_test_dataloaders
+from .dataset import celeba_train_test_dataloaders, datum_preprocessing_pipeline

@@ -23,3 +23,6 @@ class Config:
     nn_seed: int = 1023
 
     steps: int = 100
+
+    models_directory: str = "./models"
+    model_filename: str = "keypoints.eqx"

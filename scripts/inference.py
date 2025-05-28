@@ -1,3 +1,4 @@
+import os
 import sys
 
 import equinox as eqx
@@ -6,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 
+import dataset
 import model
 import utils
 from config import Config
@@ -32,15 +34,14 @@ if __name__ == "__main__":
         max_features=config.max_features,
     )
 
-    (model, state) = load_model((model, state), "./models/keypoints.eqx")
+    (model, state) = load_model(
+        (model, state), os.path.join(config.models_directory, config.model_filename)
+    )
 
     inference_model = eqx.nn.inference_mode(model)
     inference_model = eqx.Partial(inference_model, state=state)
 
-    # should be made into a pre processing pipeline
-    img = Image.open(img_path).resize(config.image_size)
-    img_np = np.array(img, dtype=np.float32) / 255.0
-    img_np = np.moveaxis(img_np, -1, 0)
+    img_np = dataset.datum_preprocessing_pipeline(Image.open(img_path))
 
     output, state = inference_model(img_np)
 

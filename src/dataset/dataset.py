@@ -41,7 +41,13 @@ def _load_landmarks(landmark_file):
     return filenames, landmarks
 
 
-def celeba_keypoints(directory, max_samples=None):
+def datum_preprocessing_pipeline(image: Image, size=(64, 64)) -> Image:
+    img = image.resize((64, 64))
+    img_np = np.array(img, dtype=np.float32) / 255.0
+    return np.moveaxis(img_np, -1, 0)
+
+
+def celeba_keypoints(directory, resized_dims, max_samples=None):
 
     if not os.path.exists(directory):
         _download_celeba(directory)
@@ -60,13 +66,10 @@ def celeba_keypoints(directory, max_samples=None):
         if max_samples and idx >= max_samples:
             break
         img_path = os.path.join(image_folder, filename)
-        img = Image.open(img_path).resize((64, 64))
-        img_np = np.array(img, dtype=np.float32) / 255.0
-        img_np = np.moveaxis(img_np, -1, 0)
+        img = Image.open(img_path)
+        images.append(datum_preprocessing_pipeline(img, resized_dims))
 
-        images.append(img_np)
-
-        lm = utils.resize_keypoints(lm.reshape(5, 2), (218, 178), (64, 64))
+        lm = utils.resize_keypoints(lm.reshape(5, 2), (218, 178), resized_dims)
         keypoints.append(lm)  # (x1,y1,...,x5,y5) → [[x,y], ...]
 
     train_length = int(len(images) * 0.8)
@@ -86,10 +89,10 @@ def celeba_keypoints(directory, max_samples=None):
 
 
 def celeba_train_test_dataloaders(
-    directory, max_samples=None, batch_size=30, data_seed=1234
+    directory, resized_dims, max_samples=None, batch_size=30, data_seed=1234
 ):
     train_images, train_keypoints, test_images, test_keypoints = celeba_keypoints(
-        directory, max_samples=max_samples
+        directory, resized_dims=resized_dims, max_samples=max_samples
     )
 
     trainloader = grain.load(
