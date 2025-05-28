@@ -11,6 +11,7 @@ import dataset
 import debugging
 import model
 import utils
+from config import Config
 
 
 import orbax
@@ -33,30 +34,6 @@ def make_step(model, state, opt_state, x, y, optimizer):
     updates, opt_state = optimizer.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
     return model, opt_state, loss, state, pred, grads
-
-
-@dataclass
-class Config:
-    max_samples: int = 18000
-    dataset_directory: str = "./data"
-
-    batch_size: int = 30
-    image_size: tuple[int, int] = (64, 64)
-
-    lr: float = 4e-4
-    lr_decay_steps: int = 100
-    lr_alpha: float = 0.2
-
-    input_channels: int = 3
-    output_channels: int = 5
-    max_features: int = 256
-    num_blocks: int = 5
-    block_expansion: int = 32
-
-    data_seed: int = 3728
-    nn_seed: int = 1023
-
-    steps: int = 100
 
 
 if __name__ == "__main__":
@@ -83,7 +60,12 @@ if __name__ == "__main__":
     key = jax.random.PRNGKey(config.nn_seed)
 
     model, state = eqx.nn.make_with_state(model.HourGlass)(
-        key, 32, 3, 5, num_blocks=5, max_features=256
+             key = key,
+             block_expansion = config.block_expansion,
+             in_features = config.input_channels,
+             out_features = config.output_channels,
+             num_blocks = config.num_blocks,
+             max_features = config.max_features,
     )
 
     opt_state = optimizer.init(eqx.filter(model, eqx.is_inexact_array))
